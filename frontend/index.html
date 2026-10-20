@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>问卷系统</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ============================================================
+       NAVIGATION BAR
+  ============================================================ -->
+  <header id="nav-bar" class="hidden">
+    <div class="nav-brand">📋 问卷系统</div>
+    <nav>
+      <button class="nav-btn" id="nav-dashboard">我的问卷</button>
+      <button class="nav-btn" id="nav-create">创建问卷</button>
+      <button class="nav-btn" id="nav-logout">退出登录</button>
+    </nav>
+  </header>
+
+  <main id="app" class="container">
+    <!-- ============================================================
+         VIEW: LOGIN / REGISTER
+    ============================================================ -->
+    <section id="view-auth" class="view">
+      <div class="auth-box">
+        <h1>问卷系统</h1>
+        <div class="auth-tabs">
+          <button class="tab-btn active" data-tab="login">登录</button>
+          <button class="tab-btn" data-tab="register">注册</button>
+        </div>
+
+        <form id="form-login" class="auth-form">
+          <div class="form-group">
+            <label for="login-username">用户名</label>
+            <input id="login-username" type="text" placeholder="输入用户名" autocomplete="username" required />
+          </div>
+          <div class="form-group">
+            <label for="login-password">密码</label>
+            <input id="login-password" type="password" placeholder="输入密码" autocomplete="current-password" required />
+          </div>
+          <button type="submit" class="btn primary">登录</button>
+          <div class="form-error hidden" id="login-error"></div>
+        </form>
+
+        <form id="form-register" class="auth-form hidden">
+          <div class="form-group">
+            <label for="reg-username">用户名</label>
+            <input id="reg-username" type="text" placeholder="3-32位，字母数字下划线" autocomplete="username" required />
+          </div>
+          <div class="form-group">
+            <label for="reg-password">密码</label>
+            <input id="reg-password" type="password" placeholder="输入密码" autocomplete="new-password" required />
+          </div>
+          <button type="submit" class="btn primary">注册</button>
+          <div class="form-error hidden" id="reg-error"></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         VIEW: DASHBOARD (my surveys)
+    ============================================================ -->
+    <section id="view-dashboard" class="view hidden">
+      <h2>我的问卷</h2>
+      <div id="survey-list"></div>
+    </section>
+
+    <!-- ============================================================
+         VIEW: CREATE / EDIT SURVEY
+    ============================================================ -->
+    <section id="view-editor" class="view hidden">
+      <div class="editor-header">
+        <button class="btn secondary" id="btn-back-list">← 返回列表</button>
+        <h2 id="editor-title">创建问卷</h2>
+        <button class="btn primary" id="btn-publish-survey">发布问卷</button>
+      </div>
+
+      <form id="form-survey-meta">
+        <div class="form-group">
+          <label for="survey-title">问卷标题</label>
+          <input id="survey-title" type="text" placeholder="问卷标题" required />
+        </div>
+        <div class="form-group">
+          <label for="survey-desc">描述</label>
+          <textarea id="survey-desc" rows="3" placeholder="问卷描述（可选）"></textarea>
+        </div>
+        <div class="form-group">
+          <label>
+            <input id="survey-anon" type="checkbox" />
+            匿名收集（不向问卷发布者公开填写人用户名）
+          </label>
+          <p class="meta" style="margin:4px 0 0 24px;font-size:.8rem">注：所有填表者均需先登录账号。勾选此项仅隐藏统计页中的用户名，答案仍会被记录并归属到账号。</p>
+        </div>
+        <button type="submit" class="btn secondary" id="btn-save-meta">保存基本信息</button>
+      </form>
+
+      <hr />
+
+      <!-- Question list -->
+      <h3>题目</h3>
+      <div id="question-list"></div>
+
+      <!-- Add question form -->
+      <div class="add-question-box">
+        <h4>添加题目</h4>
+        <div class="form-group">
+          <label for="q-type">题型</label>
+          <select id="q-type">
+            <option value="single">单选题</option>
+            <option value="multi">多选题</option>
+            <option value="text">文本题</option>
+            <option value="number">数字题</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="q-title">题目文本</label>
+          <input id="q-title" type="text" placeholder="题目内容" />
+        </div>
+        <div class="form-group">
+          <label>
+            <input id="q-required" type="checkbox" />
+            必答
+          </label>
+        </div>
+
+        <!-- Options for single/multi -->
+        <div id="q-options-box" class="form-group">
+          <label>选项（每行一个）</label>
+          <textarea id="q-options" rows="4" placeholder="选项A&#10;选项B&#10;选项C"></textarea>
+        </div>
+
+        <!-- Validation extras -->
+        <div id="q-validation-box" class="form-group hidden"></div>
+
+        <!-- Next rule -->
+        <div class="form-group">
+          <label for="q-next-rule">答题后跳转</label>
+          <select id="q-next-rule">
+            <option value="next">默认下一题</option>
+            <option value="end">结束问卷</option>
+            <option value="by_option">按选项跳转（单选）</option>
+          </select>
+        </div>
+
+        <!-- Branches config for by_option mode -->
+        <div id="q-branches-box" class="form-group hidden">
+          <label>按选项跳转 — 为每个选项指定目标题号（留空则默认下一题）</label>
+          <div id="q-branch-rows"></div>
+        </div>
+
+        <button type="button" class="btn primary" id="btn-add-question">添加题目</button>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         VIEW: FILL SURVEY (public)
+    ============================================================ -->
+    <section id="view-fill" class="view hidden">
+      <div id="fill-header"></div>
+      <div id="fill-progress">
+        <div id="fill-progress-bar"></div>
+      </div>
+      <div id="fill-question"></div>
+      <div id="fill-error" class="form-error hidden"></div>
+    </section>
+
+    <!-- ============================================================
+         VIEW: STATISTICS (owner)
+    ============================================================ -->
+    <section id="view-stats" class="view hidden">
+      <div class="editor-header">
+        <button class="btn secondary" id="btn-back-from-stats">← 返回列表</button>
+        <h2>问卷统计</h2>
+      </div>
+      <div id="stats-content"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ============================================================
+       EDIT QUESTION MODAL
+  ============================================================ -->
+  <div id="edit-modal" class="modal hidden">
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">编辑题目</h3>
+        <button class="modal-close" id="modal-close-btn" aria-label="关闭">×</button>
+      </div>
+      <form id="form-edit-question">
+        <div class="form-group">
+          <label for="edit-q-type">题型</label>
+          <select id="edit-q-type" disabled>
+            <option value="single">单选题</option>
+            <option value="multi">多选题</option>
+            <option value="text">文本题</option>
+            <option value="number">数字题</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-q-title">题目文本</label>
+          <input id="edit-q-title" type="text" placeholder="题目内容" required />
+        </div>
+        <div class="form-group">
+          <label>
+            <input id="edit-q-required" type="checkbox" />
+            必答
+          </label>
+        </div>
+        <div id="edit-q-options-box" class="form-group">
+          <label>选项（每行一个）</label>
+          <textarea id="edit-q-options" rows="4" placeholder="选项A&#10;选项B&#10;选项C"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="edit-q-next-rule">答题后跳转</label>
+          <select id="edit-q-next-rule">
+            <option value="next">默认下一题</option>
+            <option value="end">结束问卷</option>
+            <option value="by_option">按选项跳转（单选）</option>
+          </select>
+        </div>
+
+        <!-- Branches config for by_option mode in edit modal -->
+        <div id="edit-q-branches-box" class="form-group hidden">
+          <label>按选项跳转 — 为每个选项指定目标题号（留空则默认下一题）</label>
+          <div id="edit-q-branch-rows"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn danger small" id="btn-delete-question">删除题目</button>
+          <button type="submit" class="btn primary">保存修改</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

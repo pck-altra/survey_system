@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>填写问卷</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="nav-bar" class="hidden">
+    <div class="nav-brand">📋 问卷系统</div>
+    <div id="nav-user" style="margin-left:auto;color:var(--text-muted);font-size:.85rem"></div>
+  </header>
+
+  <main id="app" class="container">
+    <section id="view-fill" class="view">
+      <div id="fill-header"></div>
+      <div id="fill-progress">
+        <div id="fill-progress-bar"></div>
+      </div>
+      <div id="fill-question"></div>
+      <div id="fill-error" class="form-error hidden"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script>
+    const API_BASE = 'http://localhost:8000/api';
+    const TOKEN_KEY = 'survey_token';
+    const USER_KEY  = 'survey_user';
+
+    function getToken() { return localStorage.getItem(TOKEN_KEY); }
+    function getUser()  { try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch (_) { return null; } }
+
+    async function api(path, options = {}) {
+      const token = getToken();
+      const headers = { 'Content-Type': 'application/json', ...options.headers };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      const body = await res.text();
+      if (!res.ok) {
+        let msg = body;
+        try { msg = JSON.parse(body).detail || body; } catch (_) {}
+        throw new Error(msg);
+      }
+      if (res.status === 204) return null;
+      try { return JSON.parse(body); } catch (_) { return body; }
+    }
+
+    let toastTimer;
+    function showToast(msg, type = 'info') {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = `toast ${type}`;
+      el.classList.remove('hidden');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.add('hidden'), 3000);
+    }
+
+    function escHtml(str) {
+      if (str == null) return '';
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function logout() {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+    }
+
+    // ── State ──────────────────────────────────────────────────
+    let survey = null;
+    let questions = [];
+    let submissionId = null;
+    let currentOrder = null;
+    let answers = {};
+
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+
+    // Gate: if no auth token, jump to login with a return path.
+    if (!token) {
+      document.getElementById('fill-header').innerHTML =
+        '<p class="form-error">缺少问卷 token</p>';
+    } else if (!getToken()) {
+      const returnTo = encodeURIComponent(`fill.html?token=${token}`);
+      window.location.replace(`index.html?redirect=${returnTo}`);
+    } else {
+      // Show user in nav
+      const u = getUser();
+      if (u) document.getElementById('nav-user').textContent = `👤 ${u.username}`;
+      document.getElementById('nav-bar').classList.remove('hidden');
+      init(token);
+    }
+
+    async function init(tok) {
+      try {
+        survey = await api(`/surveys/token/${tok}`);
+        questions = await api(`/surveys/${survey.id}/questions`);
+        answers = {};
+
+        const start = await api(`/surveys/${survey.id}/submit/start`, { method: 'POST' });
+        submissionId = start.submission_id;
+        currentOrder = start.next_order;
+
+        renderHeader();
+        renderQuestion();
+      } catch (err) {
+        // 401 — token expired or invalid; bounce to login
+        if (String(err.message).toLowerCase().includes('not authenticated')) {
+          logout();
+          const returnTo = encodeURIComponent(`fill.html?token=${tok}`);
+          window.location.replace(`index.html?redirect=${returnTo}`);
+          return;
+        }
+        document.getElementById('fill-header').innerHTML =
+          `<p class="form-error">加载失败: ${escHtml(err.message)}</p>`;
+      }
+    }
+
+    function renderHeader() {
+      document.getElementById('fill-header').innerHTML = `
+        <h2 style="text-align:center">${escHtml(survey.title)}</h2>
+        ${survey.description ? `<p style="color:var(--text-muted);text-align:center">${escHtml(survey.description)}</p>` : ''}
+      `;
+    }
+
+    function renderQuestion() {
+      document.getElementById('fill-error').classList.add('hidden');
+      const q = questions.find(x => x.order === currentOrder);
+      if (!q) { finish(); return; }
+
+      const total = questions.length;
+      const done  = questions.filter(x => x.order < currentOrder).length;
+      document.getElementById('fill-progress-bar').style.width = Math.round(done/total*100) + '%';
+
+      const card = document.createElement('div');
+      card.className = 'fill-card';
+      card.innerHTML = `
+        <div class="q-title">
+          ${escHtml(q.title)}
+          ${q.required ? '<span class="q-required-note"> * 必答</span>' : ''}
+        </div>
+        ${questionInput(q)}
+        <div class="fill-nav">
+          ${answers[q.order] !== undefined
+            ? `<button class="btn secondary" id="btn-prev">← 上一题</button>`
+            : '<span></span>'}
+          <button class="btn primary" id="btn-next">${nextBtnLabel(q)}</button>
+        </div>
+      `;
+      document.getElementById('fill-question').innerHTML = '';
+      document.getElementById('fill-question').appendChild(card);
+
+      if (answers[q.order] !== undefined) restoreAnswer(q, answers[q.order]);
+
+      card.querySelector('#btn-next').addEventListener('click', () => submitAnswer(q));
+      card.querySelector('#btn-prev')?.addEventListener('click', () => goPrev(q));
+    }
+
+    function questionInput(q) {
+      if (q.type === 'single') {
+        return `<div class="options-list">
+          ${(q.options||[]).map((opt,i) => `
+            <label class="option-item" data-val="${escHtml(opt)}">
+              <input type="radio" name="q-opt" value="${escHtml(opt)}" ${i===0?'checked':''} />
+              ${escHtml(opt)}
+            </label>`).join('')}
+        </div>`;
+      }
+      if (q.type === 'multi') {
+        return `<div class="options-list">
+          ${(q.options||[]).map(opt => `
+            <label class="option-item" data-val="${escHtml(opt)}">
+              <input type="checkbox" name="q-opt" value="${escHtml(opt)}" />
+              ${escHtml(opt)}
+            </label>`).join('')}
+        </div>`;
+      }
+      if (q.type === 'text') {
+        return `<textarea id="fill-text" rows="4" placeholder="请输入...">${answers[q.order]||''}</textarea>`;
+      }
+      if (q.type === 'number') {
+        return `<input type="number" id="fill-number" placeholder="请输入数字" value="${answers[q.order]||''}" />`;
+      }
+      return '';
+    }
+
+    function nextBtnLabel(q) {
+      const r = q.next_rule || {};
+      return (r.mode==='default' && r.fallback==='end') ? '提交 ✅' : '下一题 →';
+    }
+
+    function restoreAnswer(q, val) {
+      if (q.type==='single') {
+        document.querySelectorAll('.option-item').forEach(l => {
+          const sel = l.dataset.val === val;
+          if (l.querySelector('input')) l.querySelector('input').checked = sel;
+          l.classList.toggle('selected', sel);
+        });
+      } else if (q.type==='multi') {
+        const vals = Array.isArray(val) ? val : [];
+        document.querySelectorAll('.option-item').forEach(l => {
+          const sel = vals.includes(l.dataset.val);
+          if (l.querySelector('input')) l.querySelector('input').checked = sel;
+          l.classList.toggle('selected', sel);
+        });
+      }
+    }
+
+    document.addEventListener('change', e => {
+      if (e.target.name === 'q-opt') {
+        const label = e.target.closest('.option-item');
+        if (!label) return;
+        if (e.target.type === 'radio') {
+          document.querySelectorAll('.option-item').forEach(l => l.classList.remove('selected'));
+          label.classList.add('selected');
+        } else {
+          label.classList.toggle('selected', e.target.checked);
+        }
+      }
+    });
+
+    async function submitAnswer(q) {
+      const errEl = document.getElementById('fill-error');
+      errEl.classList.add('hidden');
+
+      let value;
+      if (q.type==='single') {
+        const r = document.querySelector('input[name="q-opt"]:checked');
+        if (!r && q.required) { errEl.textContent='请选择一个选项'; errEl.classList.remove('hidden'); return; }
+        value = r?.value ?? null;
+      } else if (q.type==='multi') {
+        const vals = [...document.querySelectorAll('input[name="q-opt"]:checked')].map(el=>el.value);
+        if (!vals.length && q.required) { errEl.textContent='请至少选择一个选项'; errEl.classList.remove('hidden'); return; }
+        value = vals;
+      } else if (q.type==='text') {
+        value = document.getElementById('fill-text').value.trim();
+        if (!value && q.required) { errEl.textContent='请输入内容'; errEl.classList.remove('hidden'); return; }
+      } else if (q.type==='number') {
+        value = parseFloat(document.getElementById('fill-number').value);
+        if (isNaN(value) && q.required) { errEl.textContent='请输入数字'; errEl.classList.remove('hidden'); return; }
+      }
+
+      if (value===null || (Array.isArray(value)&&!value.length)) value = undefined;
+      answers[q.order] = value;
+
+      try {
+        const result = await api(`/surveys/${survey.id}/submit/${submissionId}/answer`, {
+          method:'POST',
+          body: JSON.stringify({ question_order: q.order, value }),
+        });
+        if (result.is_end) { await finish(); }
+        else { currentOrder = result.next_order; renderQuestion(); }
+      } catch(err) {
+        errEl.textContent = err.message; errEl.classList.remove('hidden');
+      }
+    }
+
+    function goPrev(q) {
+      const orders = questions.map(x=>x.order).sort((a,b)=>a-b);
+      const idx = orders.indexOf(q.order);
+      if (idx > 0) { currentOrder = orders[idx-1]; renderQuestion(); }
+    }
+
+    async function finish() {
+      try {
+        await api(`/surveys/${survey.id}/submit/${submissionId}/finalize`, {method:'POST'});
+        document.getElementById('fill-progress-bar').style.width = '100%';
+        document.getElementById('fill-question').innerHTML = `
+          <div class="fill-card" style="text-align:center">
+            <h3>✅ 提交成功！</h3>
+            <p style="color:var(--text-muted);margin-top:8px">感谢您的填写</p>
+          </div>`;
+      } catch(err) {
+        // 401 mid-submission: re-login and let the user retry
+        if (String(err.message).toLowerCase().includes('not authenticated')) {
+          logout();
+          const returnTo = encodeURIComponent(`fill.html?token=${params.get('token')}`);
+          window.location.replace(`index.html?redirect=${returnTo}`);
+          return;
+        }
+        const errEl = document.getElementById('fill-error');
+        errEl.textContent = '提交失败: '+err.message; errEl.classList.remove('hidden');
+      }
+    }
+  </script>
+</body>
+</html>
