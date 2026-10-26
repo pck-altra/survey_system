@@ -18,6 +18,7 @@
 | **匿名填写** | 问卷可配置是否允许匿名提交 |
 | **统计展示** | 柱状图、饼图、均值/范围统计 |
 | **Token 分发** | 发布后生成唯一 Token，可通过链接分享问卷 |
+| **题库（第二阶段）** | 保存常用题目、共享给别人、版本化（改题不影响旧问卷）、查看使用情况与跨问卷统计 |
 
 ### 技术架构
 
@@ -26,16 +27,17 @@
 ┌──────────────┐    ┌─────────────────────────────┐
 │ index.html   │    │  /api/auth   用户认证       │
 │ app.js       │◄──►│  /api/surveys 问卷 CRUD    │
-│ styles.css   │    │  /api/questions 题目管理     │
-└──────────────┘    │  /api/responses 填写流程   │
-                    │  /api/statistics 统计     │
+│ bank.js      │    │  /api/questions 题目管理     │
+│ styles.css   │    │  /api/responses 填写流程   │
+└──────────────┘    │  /api/statistics 统计     │
+                    │  /api/bank  题库 / 版本   │
                     └──────────┬────────────────┘
                                │
                     ┌──────────▼────────────────┐
                     │      MongoDB              │
                     │  users / surveys /        │
                     │  questions / responses /  │
-                    │  answers                  │
+                    │  answers / bank_questions │
                     └───────────────────────────┘
 ```
 
@@ -176,32 +178,67 @@ survey_system/
 ├── app/
 │   ├── main.py            # FastAPI 入口，挂载所有路由
 │   ├── config.py          # 配置（MongoDB URI、数据库名等）
-│   ├── db.py              # MongoDB 连接管理
+│   ├── db.py              # MongoDB 连接管理 + 索引创建
 │   ├── routing.py         # 条件跳转路由引擎
 │   ├── validation.py      # 答案校验逻辑
 │   ├── api/
 │   │   ├── auth.py        # 注册 / 登录
 │   │   ├── surveys.py     # 问卷 CRUD
-│   │   ├── questions.py   # 题目增删改
+│   │   ├── questions.py   # 题目增删改（支持从题库选题）
 │   │   ├── responses.py   # 填写流程（提交答案、推进下一题）
 │   │   ├── statistics.py  # 统计接口
+│   │   ├── bank.py        # 题库 / 版本 / 共享 / 使用情况 / 跨问卷统计
 │   │   └── schemas.py     # Pydantic 请求/响应模型
 │   └── models/
 │       ├── users.py       # 用户 Repository
 │       ├── surveys.py     # 问卷 Repository
 │       ├── questions.py   # 题目 Repository（含 next_rule 校验）
 │       ├── responses.py   # 回答路径 Repository
-│       └── answers.py     # 答案 Repository
+│       ├── answers.py     # 答案 Repository（含跨问卷统计）
+│       └── bank.py        # 题库题目 Repository（版本家族）
 ├── frontend/
-│   ├── index.html         # 管理端页面（登录/注册/创建问卷/填卷/统计）
-│   ├── app.js            # 所有前端逻辑
-│   └── styles.css        # 样式
-├── tests/
-│   └── test_api.py       # pytest 接口测试
+│   ├── index.html         # 管理端页面（登录/注册/创建问卷/填卷/统计/题库）
+│   ├── app.js             # 问卷与填写流程相关逻辑
+│   ├── bank.js            # 题库模块逻辑（列表/版本/共享/统计/选题）
+│   └── styles.css         # 样式
+├── tests/                 # pytest 自动测试（9 个模块，136 条用例）
 ├── docs/
-│   └── 数据库设计.md       # 完整设计文档
+│   ├── 数据库设计.md       # 完整设计文档（v2，含题库）
+│   ├── 测试用例.md         # 用例文档（v2，第一阶段手工 + 第二阶段自动化）
+│   ├── 项目完成报告.md     # 第一阶段报告
+│   ├── 项目完成报告（第二阶段）.md  # 第二阶段（题库）报告
+│   └── AI使用过程.md      # AI 协作日志
 └── requirements.txt
 ```
+
+---
+
+## 核心概念：题库与版本（第二阶段）
+
+`bank_questions` 集合中**一个文档 = 一个题目版本**：
+
+- `root_id` 标识"题目家族"（同一道题的所有版本）
+- `parent_id` 记录"这个版本从哪个版本改过来"（版本链 v1 → v2 → v3）
+- 修改题目 = 插入新版本文档，旧版本原封不动
+
+从题库选题时，问卷里存的是**内容快照** + 一个溯源字段 `bank_ref`：
+
+```text
+题库 v2 ──复制快照──→ 问卷 A 的题目（内容定格在 v2）
+                        bank_ref → { root_id, version_id }
+```
+
+因此：
+
+| 行为 | 结果 |
+|------|------|
+| 题库题目改成 v3 | 问卷 A 里的题目**不变**（仍是 v2 的内容） |
+| 问卷 B 选用 v3 | 只有问卷 B 变，A 不受影响 |
+| 查看"这题被哪些问卷用了" | 按 `bank_ref.root_id` 反查问卷列表 |
+| 查看"这题在所有问卷里的分布" | 按 `bank_ref.root_id` 聚合所有 `answers` |
+
+前端入口：顶部导航「题库」→ 新建 / 共享 / 查看版本历史 / 查看使用情况 / 查看跨问卷统计；
+问卷编辑器里的「📚 从题库选择」可直接把题库题加入当前问卷。
 
 ---
 
@@ -294,25 +331,26 @@ db.dropDatabase()
 
 ---
 
-## 交付物清单（第一阶段提交）
+## 交付物清单
 
-按大作业要求，以下为本阶段需提交的完整文件清单：
+按大作业要求（第一阶段 + 需求变更第二阶段），以下为需提交的完整文件清单：
 
 ### 代码
 
 | 文件 / 目录 | 说明 |
 |------------|------|
-| `app/` | 后端全部代码（FastAPI 应用、路由、Repository、数据引擎） |
-| `frontend/` | 前端全部代码（HTML + CSS + JS） |
+| `app/` | 后端全部代码（FastAPI 应用、路由、Repository、数据引擎、题库） |
+| `frontend/` | 前端全部代码（HTML + CSS + JS，含题库模块） |
 | `requirements.txt` | Python 依赖清单 |
-| `tests/` | pytest 自动测试（8 个模块） |
+| `tests/` | pytest 自动测试（9 个模块，136 条用例） |
 
 ### 文档
 
 | 文件 | 说明 |
 |------|------|
 | `README.md` | 项目说明、启动方式、调试方法（本文档） |
-| `docs/数据库设计.md` | MongoDB 集合设计、索引、关键查询示例 |
-| `docs/测试用例.md` | 17 条手工 + API 测试用例，含测试步骤 / 输入 / 输出 / 结果 |
+| `docs/数据库设计.md` | MongoDB 集合设计、索引、关键查询示例（v2，含题库） |
+| `docs/测试用例.md` | 第一阶段 17 条手工 + API 用例、第二阶段 27 条自动化用例 |
 | `docs/项目完成报告.md` | 第一阶段完整项目报告（9 个章节） |
-| `AI使用过程.md` | 6 条 AI 协作日志，含 AI 做错/改对/设计的对账记录 |
+| `docs/项目完成报告（第二阶段）.md` | 第二阶段（题库 / 可复用题目）项目报告 |
+| `docs/AI使用过程.md` | AI 协作日志，含 AI 做错 / 改对 / 设计的对账记录 |

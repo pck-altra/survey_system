@@ -64,14 +64,17 @@ class SurveyListOut(BaseModel):
 
 
 class QuestionCreate(BaseModel):
-    type: str = Field(..., pattern="^(single|multi|text|number)$")
-    title: str = Field(..., min_length=1)
+    # 从题库选题时（只给 bank_question_id），type / title 由题库版本决定，可以省略
+    type: Optional[str] = Field(None, pattern="^(single|multi|text|number)$")
+    title: Optional[str] = Field(None, min_length=1)
     options: Optional[list[str]] = None
     required: bool = False
     validation: dict[str, Any] = Field(default_factory=dict)
     next_rule: dict[str, Any] = Field(
         default_factory=lambda: {"mode": "default", "fallback": "next"}
     )
+    # 从题库选题（需求一/二）：给出题库版本 ID 时使用该版本的内容做快照
+    bank_question_id: Optional[str] = None
 
 
 class QuestionUpdate(BaseModel):
@@ -80,6 +83,8 @@ class QuestionUpdate(BaseModel):
     required: Optional[bool] = None
     validation: Optional[dict[str, Any]] = None
     next_rule: Optional[dict[str, Any]] = None
+    # 切换到题库的另一个版本（需求五：不同问卷可用不同版本）
+    bank_version_id: Optional[str] = None
 
 
 class QuestionOut(BaseModel):
@@ -92,6 +97,7 @@ class QuestionOut(BaseModel):
     options: Optional[list[str]]
     validation: dict[str, Any]
     next_rule: dict[str, Any]
+    bank_ref: Optional[dict[str, Any]] = None
     created_at: datetime
 
 
@@ -180,3 +186,150 @@ class SurveyStatsOut(BaseModel):
     multi_choice: list[MultiChoiceStats]
     number_stats: list[NumberStats]
     text_answers: list[TextStats]
+
+
+# ── 题库 / 可复用题目（需求变更）────────────────────────────────────────────
+
+
+class BankQuestionCreate(BaseModel):
+    """保存一个常用题目（需求一）。"""
+
+    type: str = Field(..., pattern="^(single|multi|text|number)$")
+    title: str = Field(..., min_length=1)
+    options: Optional[list[str]] = None
+    required: bool = False
+    validation: dict[str, Any] = Field(default_factory=dict)
+    visibility: str = Field("private", pattern="^(private|public)$")
+    tags: list[str] = Field(default_factory=list)
+    in_bank: bool = True
+    note: str = ""
+
+
+class BankQuestionUpdate(BaseModel):
+    """修改题目 → 后端会生成一个新版本，旧版本保留（需求三/四/五）。"""
+
+    title: Optional[str] = Field(None, min_length=1)
+    options: Optional[list[str]] = None
+    required: Optional[bool] = None
+    validation: Optional[dict[str, Any]] = None
+    visibility: Optional[str] = Field(None, pattern="^(private|public)$")
+    tags: Optional[list[str]] = None
+    note: str = ""
+
+
+class BankVersionCreate(BaseModel):
+    """基于已有版本创建新版本（需求五）。"""
+
+    title: Optional[str] = Field(None, min_length=1)
+    options: Optional[list[str]] = None
+    required: Optional[bool] = None
+    validation: Optional[dict[str, Any]] = None
+    note: str = ""
+
+
+class BankShare(BaseModel):
+    """共享题目给其他用户（需求二）。"""
+
+    usernames: Optional[list[str]] = None
+    visibility: Optional[str] = Field(None, pattern="^(private|public)$")
+    add_usernames: Optional[list[str]] = None
+    remove_usernames: Optional[list[str]] = None
+
+
+class BankQuestionOut(BaseModel):
+    id: str
+    root_id: str
+    version: int
+    parent_id: Optional[str]
+    title: str
+    type: str
+    options: Optional[list[str]]
+    required: bool
+    validation: dict[str, Any]
+    owner_id: str
+    owner_username: Optional[str] = None
+    visibility: str
+    shared_with: list[str]
+    tags: list[str]
+    in_bank: bool
+    note: str
+    created_at: datetime
+    updated_at: datetime
+    usage_count: int = 0
+    can_edit: bool = False
+    is_latest: bool = True
+    derived_from_title: Optional[str] = None
+
+
+class BankHistoryItem(BaseModel):
+    id: str
+    version: int
+    title: str
+    type: str
+    options: Optional[list[str]]
+    required: bool
+    note: str
+    parent_id: Optional[str]
+    parent_version: Optional[int] = None
+    parent_title: Optional[str] = None
+    created_at: datetime
+    usage_count: int = 0
+    is_latest: bool = False
+    is_current: bool = False
+
+
+class BankHistoryOut(BaseModel):
+    root_id: str
+    current_id: str
+    versions: list[BankHistoryItem]
+
+
+class BankUsageItem(BaseModel):
+    question_id: str
+    survey_id: str
+    survey_title: str
+    survey_status: str
+    order: Optional[int]
+    title: Optional[str]
+    version_id: Optional[str]
+    version: Optional[int]
+    is_current_version: bool = False
+
+
+class BankUsageOut(BaseModel):
+    root_id: str
+    version_id: str
+    total: int
+    items: list[BankUsageItem]
+
+
+class BankSurveyCount(BaseModel):
+    survey_id: str
+    title: str
+    count: int
+
+
+class BankVersionCount(BaseModel):
+    version_id: str
+    version: Optional[int]
+    title: Optional[str]
+    count: int
+
+
+class BankStatsOut(BaseModel):
+    """跨问卷统计（需求八）。"""
+
+    root_id: str
+    title: Optional[str] = None
+    type: Optional[str] = None
+    question_count: int
+    survey_count: int
+    total_answers: int
+    counts: list[ChoiceCountItem] = Field(default_factory=list)
+    avg: Optional[float] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    n: int = 0
+    values: list[str] = Field(default_factory=list)
+    by_survey: list[BankSurveyCount] = Field(default_factory=list)
+    by_version: list[BankVersionCount] = Field(default_factory=list)

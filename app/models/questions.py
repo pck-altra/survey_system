@@ -49,6 +49,7 @@ class QuestionRepo:
         * ``required``    : bool
         * ``validation``  : dict — per-type rule document
         * ``next_rule``   : dict — branching document
+        * ``bank_ref``    : dict — 参考题库题目的快照信息（需求一/二/三）
         """
         if type not in SUPPORTED_TYPES:
             raise QuestionValidationError(
@@ -61,6 +62,7 @@ class QuestionRepo:
         required = bool(fields.get("required", False))
         validation = fields.get("validation") or {}
         next_rule = fields.get("next_rule") or {"mode": "default", "fallback": "next"}
+        bank_ref = fields.get("bank_ref")
 
         # ---- inline structural checks ----
         if type in ("single", "multi"):
@@ -92,6 +94,7 @@ class QuestionRepo:
             "options": options,
             "validation": validation,
             "next_rule": next_rule,
+            "bank_ref": bank_ref,
             "created_at": dt.datetime.now(dt.timezone.utc),
         }
         try:
@@ -122,6 +125,7 @@ class QuestionRepo:
         required: Optional[bool] = None,
         validation: Optional[dict] = None,
         next_rule: Optional[dict] = None,
+        bank_ref: Optional[dict] = None,
     ) -> Optional[dict]:
         """Update a question's fields by order, returning the updated document."""
         existing = self.find_by_order(survey_id, order)
@@ -164,6 +168,8 @@ class QuestionRepo:
                 "next_rule": new_rule,
             }
         }
+        if bank_ref is not None:
+            update["$set"]["bank_ref"] = bank_ref
         result = self._coll.find_one_and_update(
             {"survey_id": survey_id, "order": order},
             update,

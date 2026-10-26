@@ -210,3 +210,57 @@
   - 第二次 StrReplace 操作时错误地覆盖而非追加，导致 `renderQuestionList` 丢失（这是导致本轮对话的直接原因）
 - **用户自己改了什么**：无
 - **用户自己设计了什么**：无
+
+---
+
+## 记录 7 · 2026-10-26 12:10
+
+> 本条记录覆盖**第二阶段：需求变更（题库 / 可复用题目）**的完整实现过程。
+
+### AI 使用日志
+- **使用的工具**：`Shell`（`unzip` + `python3` 解压 docx 提取需求文本）、`Read`、`Grep`、`Write`、`StrReplace`、`TodoWrite`、`Shell`（`pytest`）
+- **使用的提示词**：
+  - "@大作业一：需求变更.docx 现在需要按照文件要求完成第二阶段的需求变更"（八条新需求：保存题目 / 共享 / 改题不影响旧问卷 / 修改历史 / 版本共存 / 查看使用情况 / 题库 / 跨问卷统计）
+  - 后续多轮"继续"，逐步完成实现、测试与文档
+- **AI 产出 / 得到的代码或结果**：
+  - **`app/models/bank.py`（新增，532 行）**：`BankQuestionRepo` 数据访问层。核心设计是**一个文档 = 一个版本**——`root_id` 标识题目家族、`parent_id` 记录版本链、`version` 家族内递增。提供 `create` / `create_version` / `restore` / `update`（改题即建新版本）/ `share` / `fork` / `set_in_bank` / `delete`（软删除 + 已被引用则拒绝）/ `history` / `usage` / `list_visible` 等方法，以及 `can_read` / `can_write` 权限判定与自定义异常族 `BankError` / `BankPermissionError` / `BankNotFoundError` / `BankValidationError`
+  - **`app/api/bank.py`（新增，457 行）**：`/api/bank` 路由层，13 个端点覆盖八条需求（CRUD、版本历史、创建版本、恢复版本、共享、fork、加入题库、使用情况、跨问卷统计），并把 Repository 异常映射为 404 / 403 / 422
+  - **`app/api/schemas.py`**：新增 `BankQuestionCreate` / `BankQuestionUpdate` / `BankQuestionOut` / `BankShare` / `BankVersionCreate` / `BankHistoryItem` / `BankHistoryOut` / `BankUsageItem` / `BankUsageOut` / `BankStatsOut` 等请求/响应模型；`QuestionCreate` 增加可选 `bank_question_id`，`QuestionUpdate` 增加可选 `bank_version_id`，`QuestionOut` 增加 `bank_ref`
+  - **`app/models/questions.py` / `app/api/questions.py`**：问卷题目支持 `bank_ref`（`root_id` / `version_id` / `version` / `title_snapshot`）；`POST /api/surveys/{id}/questions` 传 `bank_question_id` 时**以题库内容为准写入快照**（可不传 `type` / `title`）；`PUT` 传 `bank_version_id` 可把该题切换到题库的另一个版本
+  - **`app/models/answers.py`**：新增 `StatisticsService.bank_statistics(root_id)`，按 `bank_ref.root_id` 聚合所有问卷的 `answers`，输出选项分布 / 均值 / min / max / `by_survey` / `by_version`
+  - **`app/db.py`**：新增 `bank_questions` 集合的 4 个索引（`root_id+version` 唯一、`owner_id+updated_at`、`shared_with`、`in_bank+updated_at`）与 `questions` 的 2 个 `bank_ref` 索引
+  - **`frontend/bank.js`（新增，584 行）+ `frontend/index.html` / `app.js` / `styles.css`**：题库视图（搜索 / 范围筛选 / 仅题库）、新建与修改题目弹窗、题目详情弹窗（版本历史 / 使用情况 / 跨问卷统计 / 共享 四个标签页）、问卷编辑器「📚 从题库选择」、问卷题目编辑弹窗的「题库来源版本」下拉框
+  - **`tests/test_bank.py`（新增，505 行，27 条用例）**：按需求分 8 个测试类 `TestSaveReusableQuestion` / `TestShareQuestion` / `TestModificationIsolation` / `TestVersioning` / `TestUsage` / `TestQuestionBank` / `TestCrossSurveyStatistics`
+  - **`tests/conftest.py` / `tests/test_api.py`**：测试夹具从"每用例新建独立数据库"改为"会话级复用同一临时库、用例之间清空集合"，解决本机 mongod 文件描述符上限（256）导致的 `Too many open files`
+  - **文档**：`docs/数据库设计.md` 升到 v2（新增 `bank_questions` 集合、`questions.bank_ref`、版本家族图、索引、跨问卷统计查询示例、一致性规则表）；`docs/测试用例.md` 升到 v2（新增 §7 共 21 组用例明细、§8 结果汇总）；新增 `docs/项目完成报告（第二阶段）.md`；`README.md` 补充题库功能、结构与核心概念
+- **是否修改**：✅ 大量修改
+- **修改了什么**：
+  - 新增文件：`app/models/bank.py`、`app/api/bank.py`、`frontend/bank.js`、`tests/test_bank.py`、`docs/项目完成报告（第二阶段）.md`
+  - 修改文件：`app/api/questions.py`、`app/api/schemas.py`、`app/db.py`、`app/main.py`、`app/models/__init__.py`、`app/models/answers.py`、`app/models/questions.py`、`frontend/app.js`、`frontend/index.html`、`frontend/styles.css`、`tests/conftest.py`、`tests/test_api.py`、`README.md`、`docs/数据库设计.md`、`docs/测试用例.md`、`docs/AI使用过程.md`
+  - 未提交（工作区改动，`git status` 可见 `M` 与 `??`）
+- **验证结果**：
+  - `pytest -q` → **136 passed**（其中新增题库用例 27 条）
+  - 真实浏览器手工冒烟：题库新建 / 修改生成新版本 / 版本历史与恢复 / 共享 / 加入问卷 / 问卷内切换来源版本 / 从题库选题 / 使用情况 / 跨问卷统计 共 10 条路径全部通过（详见 `docs/项目完成报告（第二阶段）.md` §5.1）
+  - 冒烟产生的临时数据已从本地开发库 `survey_system` 中清理（用户自己的问卷 1、2 与 E2E 测试问卷保留）
+
+### AI 使用说明
+- **AI 帮了什么**：
+  - 把八条自然语言需求压缩成**一套数据模型**而不是八套功能：`root_id` 家族 + `parent_id` 版本链 + "一个文档 = 一个版本"，使需求四（历史）与需求五（版本共存）成为同一机制的两种读法
+  - 提出**"问卷存快照 + `bank_ref` 溯源"**的方案，一举解决需求三（改题不影响旧问卷）、六（被哪些问卷用）、八（跨问卷统计），避免为每条需求单独建表；并说明其代价（内容冗余）与收益（历史语义不漂移）
+  - 完整实现数据层 → API 层 → 前端 → 自动化测试的垂直切片，并保持第一阶段 109 条用例的断言不变
+  - 把"共享名单"设计成对外用用户名、内部存用户 ID，并在解析不到用户时返回 422，避免静默失败
+  - 补齐三份配套文档并与代码对齐（数据库设计升 v2、测试用例新增 §7、第二阶段完成报告）
+- **AI 做错了什么 / 哪里不准**：
+  - 最初设计"问卷只存 `version_id`、读取时实时去题库取内容"，后来推翻了：那样会让历史数据的可读性完全依赖题库不被清理，题库一删历史就乱；改为存快照
+  - `GET /api/bank/questions` 起初会列出同一题的 v1/v2/v3 造成刷屏，补了按 `root_id` 去重、只保留最新版本的逻辑
+  - 测试夹具最初沿用第一阶段"每用例新建数据库"的写法，用例数翻倍后触发本机 mongod 的 `Too many open files`，改为会话级复用 + 用例间清空集合
+  - 写文档时一度把"已发布问卷题目不可修改"与"可切换题库版本"混在一起，后按实际代码区分：已发布问卷一律不可改；草稿问卷可通过 `bank_version_id` 切换来源版本
+  - **前端冒烟暴露的两个问题**（随后修复）：
+    - "加入问卷"成功后只弹提示、不刷新题库列表，导致"被 N 个问卷题目引用"仍是旧值 → 在 `frontend/bank.js` 补上 `await renderBank()`
+    - 问卷里切换题库来源版本后，角标显示 v1 但题干仍是 v2 的内容（编辑表单把旧题干当作"显式字段"提交，后端按"显式优先"保留旧内容）→ 改为切换版本时把该版本的题干 / 选项 / 必答回填到表单
+- **用户自己改了什么**：
+  - 用户提供了《需求变更说明》原始文档（`docs/大作业一：需求变更.docx`），八条需求的措辞、示例与优先级由用户给出
+  - 用户决定把本阶段的产出定位为"第二阶段"，并要求保留第一阶段的全部行为（不重构既有问卷/填写/统计链路）
+- **用户自己设计了什么**：
+  - 用户自己给出了八条需求的**取舍与语义**：题目以"一个题目一个家族"为单位共享；修改必须生成新版本而不是就地改；恢复旧版本是"以旧内容生成新版本"而不是回滚；统计要跨问卷汇总而不是按问卷分别看
+  - 用户自己设计了使用场景（老师的题给学生用、"你的年龄"在多份问卷里复用），这些场景直接决定了"快照 + 溯源"的方案取向

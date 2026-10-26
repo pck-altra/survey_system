@@ -69,6 +69,7 @@ function showView(name, data = {}) {
   if (name === 'editor')     initEditor(data);
   if (name === 'fill')       initFillSurvey(data);
   if (name === 'stats')      renderStats(data);
+  if (name === 'bank')       renderBank();
 }
 
 // ================================================================
@@ -171,6 +172,7 @@ document.getElementById('form-register').addEventListener('submit', async e => {
 // ================================================================
 document.getElementById('nav-dashboard').addEventListener('click', () => showView('dashboard'));
 document.getElementById('nav-create').addEventListener('click', () => showView('editor', {}));
+document.getElementById('nav-bank').addEventListener('click', () => showView('bank'));
 document.getElementById('nav-logout').addEventListener('click', () => {
   clearAuth();
   showView('auth');
@@ -270,6 +272,7 @@ function renderQuestionList() {
         <span class="q-type">${typeLabel(q.type)}</span>
       </div>
       ${q.options ? `<div class="q-meta">选项: ${q.options.join('、')}</div>` : ''}
+      ${q.bank_ref ? `<div class="q-meta">📚 来自题库 v${q.bank_ref.version ?? '?'}（${escHtml(q.bank_ref.title_snapshot || '')}）</div>` : ''}
       <div class="q-meta">${q.required ? '✅ 必答' : '❌ 选答'} · ${nextRuleLabel(q.next_rule)}</div>
       <div class="q-actions">
         <button class="btn secondary small" onclick="openEditModal(${q.order})">编辑</button>
@@ -494,6 +497,11 @@ function openEditModal(order) {
   }
 
   document.getElementById('edit-modal').classList.remove('hidden');
+
+  // 若该题来自题库，加载可切换的版本列表（需求五）
+  if (typeof loadBankVersionsForQuestion === 'function') {
+    loadBankVersionsForQuestion(q);
+  }
 }
 
 // Close modal
@@ -550,9 +558,16 @@ document.getElementById('form-edit-question').addEventListener('submit', async e
   }
 
   try {
+    const body = { title, required, options, next_rule };
+    // 切换到题库的另一个版本（需求五）
+    if (typeof selectedBankVersionId === 'function') {
+      const vid = selectedBankVersionId(q);
+      if (vid) body.bank_version_id = vid;
+    }
+
     const updated = await api(`/surveys/${editorState.surveyId}/questions/${editModalOrder}`, {
       method: 'PUT',
-      body: JSON.stringify({ title, required, options, next_rule }),
+      body: JSON.stringify(body),
     });
     // sync local state
     const idx = editorState.questions.findIndex(x => x.order === editModalOrder);

@@ -436,3 +436,39 @@ input:focus, textarea:focus, select:focus {
   gap: 6px;
   margin-top: 8px;
 }
+
+/* ================================================================
+   BANK — 题库 / 可复用题目（需求变更）
+================================================================ */
+.bank-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.bank-toolbar input[type="text"],
+.bank-toolbar select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  background: var(--card);
+  color: var(--text);
+}
+
+.bank-toolbar input[type="text"] { flex: 1; min-width: 200px; }
+
+.inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+/* 详情弹窗更宽，放得下版本历史表格 */
+.modal-box.wide { max-width: 780px; }
+
+.modal-box h4 { margin: 0 0 12px 0; }

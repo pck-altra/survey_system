@@ -15,6 +15,7 @@
     <nav>
       <button class="nav-btn" id="nav-dashboard">我的问卷</button>
       <button class="nav-btn" id="nav-create">创建问卷</button>
+      <button class="nav-btn" id="nav-bank">题库</button>
       <button class="nav-btn" id="nav-logout">退出登录</button>
     </nav>
   </header>
@@ -65,6 +66,32 @@
     <section id="view-dashboard" class="view hidden">
       <h2>我的问卷</h2>
       <div id="survey-list"></div>
+    </section>
+
+    <!-- ============================================================
+         VIEW: BANK (题库 / 可复用题目)
+    ============================================================ -->
+    <section id="view-bank" class="view hidden">
+      <div class="editor-header">
+        <button class="btn secondary" id="btn-bank-back">← 返回列表</button>
+        <h2>题库</h2>
+        <button class="btn primary" id="btn-bank-new">＋ 新建题目</button>
+      </div>
+
+      <div class="bank-toolbar">
+        <input id="bank-search" type="text" placeholder="搜索题干关键字…" />
+        <select id="bank-scope">
+          <option value="all">全部可见</option>
+          <option value="mine">我创建的</option>
+          <option value="shared">共享给我的</option>
+        </select>
+        <label class="inline-label">
+          <input id="bank-only" type="checkbox" />
+          仅显示题库中的题目
+        </label>
+      </div>
+
+      <div id="bank-list"></div>
     </section>
 
     <!-- ============================================================
@@ -150,7 +177,13 @@
           <div id="q-branch-rows"></div>
         </div>
 
-        <button type="button" class="btn primary" id="btn-add-question">添加题目</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn primary" id="btn-add-question">添加题目</button>
+          <button type="button" class="btn secondary" id="btn-pick-from-bank">📚 从题库选择</button>
+        </div>
+        <p class="meta" style="margin:8px 0 0 0;font-size:.8rem">
+          从题库选题会保存一份题目快照：之后题库里的原题如何修改，都不会影响本问卷（需求三）。
+        </p>
       </div>
     </section>
 
@@ -229,6 +262,14 @@
           <div id="edit-q-branch-rows"></div>
         </div>
 
+        <div id="edit-q-bank-box" class="form-group hidden">
+          <label for="edit-q-bank-version">题库来源版本</label>
+          <select id="edit-q-bank-version"></select>
+          <p class="meta" style="margin:4px 0 0 0;font-size:.8rem">
+            该题来自题库。切换到别的版本会更新本问卷中这道题的快照内容，不影响其他问卷（需求五）。
+          </p>
+        </div>
+
         <div class="modal-actions">
           <button type="button" class="btn danger small" id="btn-delete-question">删除题目</button>
           <button type="submit" class="btn primary">保存修改</button>
@@ -237,6 +278,131 @@
     </div>
   </div>
 
+  <!-- ============================================================
+       BANK MODAL — 新建 / 修改题目（修改会生成新版本）
+  ============================================================ -->
+  <div id="bank-modal" class="modal hidden">
+    <div class="modal-backdrop" id="bank-modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="bank-modal-title">新建题目</h3>
+        <button class="modal-close" id="bank-modal-close" aria-label="关闭">×</button>
+      </div>
+      <form id="form-bank-question">
+        <div class="form-group">
+          <label for="bank-q-type">题型</label>
+          <select id="bank-q-type">
+            <option value="single">单选题</option>
+            <option value="multi">多选题</option>
+            <option value="text">文本题</option>
+            <option value="number">数字题</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="bank-q-title">题目文本</label>
+          <input id="bank-q-title" type="text" placeholder="题目内容" required />
+        </div>
+        <div class="form-group">
+          <label>
+            <input id="bank-q-required" type="checkbox" />
+            必答
+          </label>
+        </div>
+        <div id="bank-q-options-box" class="form-group">
+          <label>选项（每行一个）</label>
+          <textarea id="bank-q-options" rows="4" placeholder="选项A&#10;选项B&#10;选项C"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="bank-q-tags">标签（逗号分隔，用于题库分类）</label>
+          <input id="bank-q-tags" type="text" placeholder="人口学, 通用" />
+        </div>
+        <div class="form-group">
+          <label for="bank-q-visibility">可见性</label>
+          <select id="bank-q-visibility">
+            <option value="private">仅自己可见</option>
+            <option value="public">公开（所有人可使用）</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>
+            <input id="bank-q-in-bank" type="checkbox" checked />
+            加入题库
+          </label>
+        </div>
+        <div class="form-group">
+          <label for="bank-q-note">改动说明</label>
+          <input id="bank-q-note" type="text" placeholder="例如：新增了 26-35 岁选项" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" id="bank-modal-cancel">取消</button>
+          <button type="submit" class="btn primary" id="bank-modal-submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       BANK PICKER MODAL — 从题库选题
+  ============================================================ -->
+  <div id="bank-picker-modal" class="modal hidden">
+    <div class="modal-backdrop" id="bank-picker-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>从题库选择题目</h3>
+        <button class="modal-close" id="bank-picker-close" aria-label="关闭">×</button>
+      </div>
+      <div class="form-group">
+        <input id="bank-picker-search" type="text" placeholder="搜索题干关键字…" />
+      </div>
+      <div id="bank-picker-list"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="bank-picker-cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       BANK DETAIL MODAL — 版本历史 / 使用情况 / 跨问卷统计 / 共享
+  ============================================================ -->
+  <div id="bank-detail-modal" class="modal hidden">
+    <div class="modal-backdrop" id="bank-detail-backdrop"></div>
+    <div class="modal-box wide">
+      <div class="modal-header">
+        <h3 id="bank-detail-title">题目详情</h3>
+        <button class="modal-close" id="bank-detail-close" aria-label="关闭">×</button>
+      </div>
+      <div id="bank-detail-body"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="bank-detail-close-2">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       BANK USE MODAL — 把题库题目加入某个问卷
+  ============================================================ -->
+  <div id="bank-use-modal" class="modal hidden">
+    <div class="modal-backdrop" id="bank-use-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>添加到问卷</h3>
+        <button class="modal-close" id="bank-use-close" aria-label="关闭">×</button>
+      </div>
+      <div class="form-group">
+        <label for="bank-use-survey">选择问卷</label>
+        <select id="bank-use-survey"></select>
+      </div>
+      <p class="meta" style="margin:0 0 12px 0;font-size:.8rem">
+        同一道题可以加入多个问卷；每个问卷保存各自的题目快照，互不影响。
+      </p>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="bank-use-cancel">取消</button>
+        <button type="button" class="btn primary" id="bank-use-confirm">添加</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
+  <script src="bank.js"></script>
 </body>
 </html>

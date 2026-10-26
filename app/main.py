@@ -31,13 +31,14 @@ def on_startup() -> None:
 
 
 # ── mount sub-routers ────────────────────────────────────────────────────────
-from .api import auth, surveys, questions, responses, statistics
+from .api import auth, surveys, questions, responses, statistics, bank
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(surveys.router, prefix="/api/surveys", tags=["surveys"])
 app.include_router(questions.router, prefix="/api/surveys", tags=["questions"])
 app.include_router(responses.router, prefix="/api/surveys", tags=["responses"])
 app.include_router(statistics.router, prefix="/api/surveys", tags=["statistics"])
+app.include_router(bank.router, prefix="/api/bank", tags=["bank"])
 
 
 @app.get("/api/health")

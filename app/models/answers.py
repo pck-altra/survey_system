@@ -170,6 +170,154 @@ class StatisticsService:
             {"survey_id": survey_id, "submitted_at": {"$ne": None}}
         )
 
+    # ------------------------------------------------------------------
+    # 跨问卷统计（需求八）
+    # ------------------------------------------------------------------
+
+    def bank_statistics(
+        self, root_id: ObjectId, *, version_ids: Optional[list[ObjectId]] = None
+    ) -> dict:
+        """统计某个题库题目（整个版本家族）在**所有问卷**中的回答情况。
+
+        对应需求八："我希望能看某一道题在所有问卷中的回答情况"。
+
+        Parameters
+        ----------
+        root_id:
+            题库题目的家族 ID。
+        version_ids:
+            若给定，则只统计这些版本被引用的问卷题目；默认统计家族全部版本。
+
+        Returns
+        -------
+        dict
+            ``title`` / ``type`` / ``question_count`` / ``survey_count`` /
+            ``total_answers`` / ``counts`` / ``avg`` / ``min`` / ``max`` /
+            ``n`` / ``values`` / ``by_survey`` / ``by_version``。
+        """
+        query: dict[str, Any] = {"bank_ref.root_id": root_id}
+        if version_ids is not None:
+            query["bank_ref.version_id"] = {"$in": list(version_ids)}
+        questions = list(self._questions.find(query))
+        qids = [q["_id"] for q in questions]
+
+        result: dict[str, Any] = {
+            "question_count": len(questions),
+            "survey_count": 0,
+            "total_answers": 0,
+            "counts": [],
+            "avg": None,
+            "min": None,
+            "max": None,
+            "n": 0,
+            "values": [],
+            "by_survey": [],
+            "by_version": [],
+        }
+        if not qids:
+            return result
+
+        # 题干 / 题型：取该家族最新题目的类型
+        latest = self._db["bank_questions"].find_one(
+            {"root_id": root_id}, sort=[("version", -1)]
+        )
+        if latest:
+            result["title"] = latest["title"]
+            result["type"] = latest["type"]
+
+        types = {q.get("type") for q in questions}
+        qtype = next(iter(types)) if len(types) == 1 else "mixed"
+
+        # 每个题目一行的原始计数
+        per_question: dict[Any, int] = {}
+        if qtype in ("single", "multi"):
+            pipeline = [
+                {"$match": {"question_id": {"$in": qids}}},
+                {"$unwind": "$value"},
+                {"$group": {"_id": {"q": "$question_id", "v": "$value"}, "count": {"$sum": 1}}},
+            ]
+            merged: dict[Any, int] = {}
+            for item in self._answers.aggregate(pipeline):
+                merged[item["_id"]["v"]] = merged.get(item["_id"]["v"], 0) + item["count"]
+            result["counts"] = [
+                {"value": v, "count": c} for v, c in sorted(merged.items(), key=lambda kv: (-kv[1], str(kv[0])))
+            ]
+            result["total_answers"] = sum(merged.values())
+        elif qtype == "number":
+            pipeline = [
+                {"$match": {"question_id": {"$in": qids}}},
+                {
+                    "$group": {
+                        "_id": None,
+                        "avg": {"$avg": "$value"},
+                        "n": {"$sum": 1},
+                        "min": {"$min": "$value"},
+                        "max": {"$max": "$value"},
+                    }
+                },
+            ]
+            docs = list(self._answers.aggregate(pipeline))
+            if docs:
+                result.update({k: v for k, v in docs[0].items() if k != "_id"})
+            result["total_answers"] = result["n"]
+        else:  # text / mixed
+            cursor = self._answers.find({"question_id": {"$in": qids}}, projection={"value": 1})
+            values = [d["value"] for d in cursor]
+            result["values"] = values
+            result["total_answers"] = len(values)
+
+        # 每个问卷的作答次数
+        survey_of_q = {q["_id"]: q["survey_id"] for q in questions}
+        answer_counts = self._db["answers"].aggregate(
+            [
+                {"$match": {"question_id": {"$in": qids}}},
+                {"$group": {"_id": "$question_id", "count": {"$sum": 1}}},
+            ]
+        )
+        for item in answer_counts:
+            per_question[item["_id"]] = item["count"]
+
+        survey_counts: dict[Any, int] = {}
+        version_counts: dict[Any, int] = {}
+        questions_by_id = {q["_id"]: q for q in questions}
+        for qid, count in per_question.items():
+            sid = survey_of_q.get(qid)
+            if sid is not None:
+                survey_counts[sid] = survey_counts.get(sid, 0) + count
+            ref = questions_by_id.get(qid, {}).get("bank_ref") or {}
+            vid = ref.get("version_id")
+            if vid is not None:
+                version_counts[vid] = version_counts.get(vid, 0) + count
+
+        survey_ids = list(survey_counts.keys())
+        titles = {
+            s["_id"]: s["title"]
+            for s in self._db["surveys"].find({"_id": {"$in": survey_ids}}, projection={"title": 1})
+        }
+        result["survey_count"] = len(survey_ids)
+        result["by_survey"] = [
+            {"survey_id": sid, "title": titles.get(sid, "(问卷已删除)"), "count": c}
+            for sid, c in sorted(survey_counts.items(), key=lambda kv: (-kv[1], str(kv[0])))
+        ]
+
+        version_docs = {
+            v["_id"]: v
+            for v in self._db["bank_questions"].find({"root_id": root_id})
+        }
+        result["by_version"] = [
+            {
+                "version_id": vid,
+                "version": (version_docs.get(vid) or {}).get("version"),
+                "title": (version_docs.get(vid) or {}).get("title"),
+                "count": c,
+            }
+            for vid, c in sorted(
+                version_counts.items(),
+                key=lambda kv: ((version_docs.get(kv[0]) or {}).get("version") or 0),
+            )
+        ]
+        return result
+
     def respondents(
         self, survey_id: ObjectId, *, include_usernames: bool
     ) -> list[dict]:

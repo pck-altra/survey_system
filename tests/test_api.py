@@ -8,34 +8,29 @@ from bson import ObjectId
 from app.main import app
 from app import get_db, reset_client, ensure_indexes
 from app.config import config
+from tests.conftest import clean_collections
 
 
-@pytest.fixture(scope="function")
-def client():
-    """Isolated test database + TestClient.
+@pytest.fixture(scope="module")
+def _api_client(session_db):
+    """TestClient bound to the session-level test database.
 
-    Each test gets its own isolated MongoDB database so tests never interfere
-    with each other.  We achieve this by:
-
-    1. reset_client()      — close the existing singleton
-    2. config.MONGO_DB    — point the config at the fresh test database name
-    3. ensure_indexes()   — create indexes on the test database
-       (get_db() inside ensure_indexes reads config.MONGO_DB which we just set)
+    只创建一次（``TestClient`` 的 startup 会触发 ``ensure_indexes``），
+    用例之间的数据清理由 :func:`client` 完成。
     """
-    test_db_name = f"survey_system_test_{ObjectId()}"
-
-    reset_client()
-    original_db = config.MONGO_DB
-    config.MONGO_DB = test_db_name
-
-    db = get_db()   # reads config.MONGO_DB (= test_db_name) → test database
-    ensure_indexes(db)
-
     with TestClient(app) as c:
         yield c
 
-    config.MONGO_DB = original_db
-    reset_client()
+
+@pytest.fixture(scope="function")
+def client(_api_client, session_db):
+    """Isolated test database + TestClient.
+
+    每个用例前清空所有集合，数据库本身在整个模块内复用——本机 mongod 的
+    文件描述符上限较低（launchd 默认 256），每用例新建数据库会耗尽 fd。
+    """
+    clean_collections(session_db)
+    yield _api_client
 
 
 @pytest.fixture

@@ -123,3 +123,26 @@ def ensure_indexes(db: Optional[Database] = None) -> None:
     # answers
     db["answers"].create_index([("response_id", ASCENDING)], name="response")
     db["answers"].create_index([("question_id", ASCENDING)], name="question")
+
+    # bank_questions — 题库题目 / 版本历史（需求变更）
+    db["bank_questions"].create_index(
+        [("root_id", ASCENDING), ("version", ASCENDING)],
+        unique=True,
+        name="uniq_bank_root_version",
+    )
+    db["bank_questions"].create_index(
+        [("owner_id", ASCENDING), ("updated_at", DESCENDING)],
+        name="bank_owner_updated",
+    )
+    db["bank_questions"].create_index([("shared_with", ASCENDING)], name="bank_shared")
+    db["bank_questions"].create_index(
+        [("in_bank", ASCENDING), ("updated_at", DESCENDING)],
+        name="bank_collection",
+    )
+    # 需求六/八：按题库题目反查问卷题目
+    db["questions"].create_index(
+        [("bank_ref.root_id", ASCENDING)], name="bank_ref_root"
+    )
+    db["questions"].create_index(
+        [("bank_ref.version_id", ASCENDING)], name="bank_ref_version"
+    )
